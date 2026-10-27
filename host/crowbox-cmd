@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+# Send a command to the CrowBox through crowbox_feeder: crowbox-cmd STATUS | OPEN | CLOSE | PHASE <1-4>
+# With Docker: docker compose exec feeder crowbox-cmd STATUS
+# Replies (EVT STATUS, EVT ERR) land in events.jsonl in the data folder.
+set -euo pipefail
+
+FIFO="${CROWBOX_RUN:-/run/crowbox}/cmd"
+[[ $# -gt 0 ]] || { echo "usage: crowbox-cmd STATUS | OPEN | CLOSE | PHASE <1-4>" >&2; exit 2; }
+[[ -p $FIFO ]] || { echo "crowbox-feeder is not running ($FIFO missing)" >&2; exit 1; }
+
+echo "CMD $*" > "$FIFO"

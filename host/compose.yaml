@@ -1,0 +1,16 @@
+services:
+  stream:
+    build: .
+    image: crowbox-host
+    command: crowbox-stream.sh
+    env_file: .env
+    restart: unless-stopped
+
+  feeder:
+    build: .
+    image: crowbox-host
+    command: crowbox_feeder.py
+    env_file: .env
+    volumes:
+      - ./data:/data
+    restart: unless-stopped
