@@ -150,6 +150,9 @@ CCrowboxCore::CCrowboxCore()
     m_isPerchOccupied = false;
     m_msPerchLastPressed = 0;
     m_msLastHeartbeat = 0;
+
+    m_commandLength = 0;
+    m_isCommandOverflowing = false;
 }
 
 //----------------------------------------------------------
@@ -160,9 +163,9 @@ void CCrowboxCore::Setup()
     // fire during the slow servo parking below
     wdt_disable();
 
-#if defined( CROS_USE_SERIAL_DEBUG ) || defined( CROS_USE_SERIAL_EVENTS )
+#if defined( CROS_USE_SERIAL_DEBUG ) || defined( CROS_USE_SERIAL_EVENTS ) || defined( CROS_USE_SERIAL_COMMANDS )
     Serial.begin( CROS_SERIAL_BAUD_RATE );
-#endif//CROS_USE_SERIAL_DEBUG || CROS_USE_SERIAL_EVENTS
+#endif//CROS_USE_SERIAL_DEBUG || CROS_USE_SERIAL_EVENTS || CROS_USE_SERIAL_COMMANDS
  
     DebugPrint( "Setup() method CALLED...\n" );
  
@@ -336,6 +339,9 @@ void CCrowboxCore::Loop()
     ReportPerchEvents();
     ReportCoinEvents();
     ReportHeartbeat();
+
+    // CrOS-Pi: let the Pi drive the box
+    ProcessSerialCommands();
 
     // Now we do some time arithmetic to figure out how long this loop took to
     // execute. If it's less than IDEAL_LOOP_MS, then we make the system 
@@ -930,6 +936,101 @@ void CCrowboxCore::ReportHeartbeat()
 
   m_msLastHeartbeat = millis();
   ReportEvent( "ALIVE", (unsigned long)GetUptimeSeconds() );
+}
+
+//----------------------------------------------------------
+// CrOS-Pi: collect whatever arrived on the serial port and
+// run every complete line as a command. Never blocks.
+//----------------------------------------------------------
+void CCrowboxCore::ProcessSerialCommands()
+{
+#if defined( CROS_USE_SERIAL_COMMANDS )
+  while( Serial.available() > 0 )
+  {
+    char c = (char)Serial.read();
+
+    if( c == '\n' || c == '\r' )
+    {
+      if( m_commandLength > 0 && !m_isCommandOverflowing )
+      {
+        m_commandBuffer[ m_commandLength ] = '\0';
+        ExecuteCommand( m_commandBuffer );
+      }
+      m_commandLength = 0;
+      m_isCommandOverflowing = false;
+    }
+    else if( m_commandLength < CROS_COMMAND_MAX_LENGTH - 1 )
+    {
+      m_commandBuffer[ m_commandLength++ ] = c;
+    }
+    else
+    {
+      m_isCommandOverflowing = true;
+    }
+  }
+#endif//CROS_USE_SERIAL_COMMANDS
+}
+
+//----------------------------------------------------------
+// CrOS-Pi: one command line from the Pi. The lid keeps all
+// of its safety behavior: OPEN still closes by itself and
+// CLOSE still closes in slow steps.
+//----------------------------------------------------------
+void CCrowboxCore::ExecuteCommand( const char *pCommand )
+{
+  if( strcmp( pCommand, "CMD STATUS" ) == 0 )
+  {
+    ReportStatus();
+    return;
+  }
+
+  if( strncmp( pCommand, "CMD PHASE ", 10 ) == 0 )
+  {
+    int phase = atoi( pCommand + 10 );
+    if( phase >= PHASE_ONE && phase <= PHASE_FOUR )
+    {
+      m_currentTrainingPhase = (unsigned char)phase;
+      ApplyTrainingPhaseChange();
+      return;
+    }
+  }
+
+  if( strcmp( pCommand, "CMD OPEN" ) == 0 )
+  {
+    OpenRewardBasket();
+    if( m_currentTrainingPhase != PHASE_ONE )
+    {
+      ScheduleBasketCloseWithDelay( BASKET_REMAIN_OPEN_DURATION );
+    }
+    return;
+  }
+
+  if( strcmp( pCommand, "CMD CLOSE" ) == 0 && m_currentTrainingPhase != PHASE_ONE )
+  {
+    m_isBasketCloseScheduled = false;
+    CloseRewardBasket();
+    return;
+  }
+
+  Serial.print( "EVT ERR " );
+  Serial.println( pCommand );
+}
+
+//----------------------------------------------------------
+// CrOS-Pi: answer to CMD STATUS
+//----------------------------------------------------------
+void CCrowboxCore::ReportStatus()
+{
+  Serial.print( "EVT STATUS phase=" );
+  Serial.print( m_currentTrainingPhase );
+  Serial.print( " basket=" );
+  Serial.print( IsRewardBasketOpen() ? "open" : "closed" );
+  Serial.print( " perch=" );
+  Serial.print( Poll_IsPerchPressed() ? 1 : 0 );
+  Serial.print( " queued=" );
+  Serial.print( m_numEnqueuedDeposits );
+  Serial.print( " uptime=" );
+  Serial.println( (unsigned long)GetUptimeSeconds() );
 }
 
 //----------------------------------------------------------

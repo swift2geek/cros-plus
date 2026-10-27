@@ -103,6 +103,13 @@ protected:
     void ReportHeartbeat();
 
     //--------------------------------------
+    // CrOS-Pi: serial commands from the Pi
+    //--------------------------------------
+    void ProcessSerialCommands();
+    void ExecuteCommand( const char *pCommand );
+    void ReportStatus();
+
+    //--------------------------------------
     // EEPROM Methods
     //--------------------------------------
     bool  ValidateEEPROMData();
@@ -183,6 +190,15 @@ private:
     bool         m_isPerchOccupied;
     cros_ms_t    m_msPerchLastPressed;
     cros_ms_t    m_msLastHeartbeat;
+
+    //--------------------------------------
+    // CrOS-Pi: the command line being received.
+    // A line longer than the buffer is dropped
+    // as a whole.
+    //--------------------------------------
+    char          m_commandBuffer[ CROS_COMMAND_MAX_LENGTH ];
+    unsigned char m_commandLength;
+    bool          m_isCommandOverflowing;
 
     //--------------------------------------
     // The servo which controls the lid that

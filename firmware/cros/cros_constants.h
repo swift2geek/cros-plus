@@ -72,6 +72,19 @@
 #define EVENT_PERCH_DEPARTURE_DELAY  2.0f
 
 //======================================
+// CrOS-Pi: commands from the Raspberry Pi, one
+// per line on the same serial port:
+//   CMD STATUS       reply: EVT STATUS phase=<n> basket=<open|closed> perch=<0|1> queued=<n> uptime=<s>
+//   CMD PHASE <n>    switch to training phase 1-4 (same as the button)
+//   CMD OPEN         open the lid; it closes again by itself as usual
+//   CMD CLOSE        close the lid now (refused in phase 1, which keeps it open)
+// A command that can't be carried out is answered
+// with EVT ERR <command>.
+//======================================
+#define CROS_USE_SERIAL_COMMANDS
+#define CROS_COMMAND_MAX_LENGTH  24
+
+//======================================
 // CrOS-Pi: how often EVT ALIVE is sent, so
 // the Pi notices a dead or unplugged box
 //======================================
