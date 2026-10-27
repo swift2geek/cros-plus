@@ -88,6 +88,7 @@ protected:
     void RunPhaseThreeProtocol();
     void RunPhaseFourProtocol();
     void AdvanceCurrentTrainingPhase();
+    void ApplyTrainingPhaseChange();
 
     void CheckTrainingPhaseSwitch();
 

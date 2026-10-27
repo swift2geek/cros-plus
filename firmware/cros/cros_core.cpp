@@ -398,7 +398,13 @@ bool CCrowboxCore::EnqueueCoin()
         return false;
     }
     
-    m_numEnqueuedDeposits++;
+    // CrOS-Pi: only phases 3 and 4 pay for coins. Counting deposits
+    // in phases 1-2 made the basket open over and over for old coins
+    // right after switching to phase 3.
+    if( m_currentTrainingPhase >= PHASE_THREE )
+    {
+        m_numEnqueuedDeposits++;
+    }
     m_numUnreportedDeposits++;
     m_uptimeLastCoinDetected = GetUptimeSeconds();
     return true;
@@ -789,12 +795,34 @@ void CCrowboxCore::CheckTrainingPhaseSwitch()
   };
   
   AdvanceCurrentTrainingPhase();
+  ApplyTrainingPhaseChange();
+}
+
+//----------------------------------------------------------
+// CrOS-Pi: everything that has to happen after the training
+// phase changed, no matter who changed it.
+//
+// Leftover coin deposits are dropped so the new phase starts
+// clean. A basket left open by phase 1 is scheduled to close,
+// otherwise it would stay open forever in phases 3 and 4
+// (they only ever open a closed basket).
+//----------------------------------------------------------
+void CCrowboxCore::ApplyTrainingPhaseChange()
+{
+  noInterrupts();
+  m_numEnqueuedDeposits = 0;
+  interrupts();
+
+  if( m_currentTrainingPhase != PHASE_ONE && IsRewardBasketOpen() )
+  {
+    ScheduleBasketCloseWithDelay( BASKET_REMAIN_OPEN_DURATION );
+  }
+
   ReportCurrentTrainingPhase();
 
   // Write it to the PROM now.
   WriteCurrentTrainingPhaseToEEPROM();
 
-  // CrOS-Pi: let the Pi know about the new phase
   ReportEvent( "PHASE", m_currentTrainingPhase );
 }
 
