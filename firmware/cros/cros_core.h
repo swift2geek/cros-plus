@@ -42,6 +42,8 @@ public:
 
 public:
     void DebugPrint( const char *pString );
+    void ReportEvent( const char *pName );
+    void ReportEvent( const char *pName, int value );
     void ReportSystemError( cros_error_code_t errorCode );
     
     //--------------------------------------
@@ -88,6 +90,12 @@ protected:
     void AdvanceCurrentTrainingPhase();
 
     void CheckTrainingPhaseSwitch();
+
+    //--------------------------------------
+    // CrOS-Pi: serial events for the Pi
+    //--------------------------------------
+    void ReportPerchEvents();
+    void ReportCoinEvents();
 
     //--------------------------------------
     // EEPROM Methods
@@ -139,7 +147,18 @@ private:
     // the door in order to square up the debt
     //--------------------------------------
     volatile int m_numEnqueuedDeposits;
-    
+
+    //--------------------------------------
+    // CrOS-Pi: coin deposits counted by the
+    // interrupt but not yet reported over
+    // serial (the interrupt can't touch the
+    // serial port), and the perch state used
+    // to report arrivals in every phase.
+    //--------------------------------------
+    volatile int m_numUnreportedDeposits;
+    bool         m_isPerchOccupied;
+    cros_time_t  m_uptimePerchLastPressed;
+
     //--------------------------------------
     // The servo which controls the lid that
     // covers the reward basket.

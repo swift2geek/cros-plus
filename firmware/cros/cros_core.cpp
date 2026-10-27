@@ -38,6 +38,30 @@ void CCrowboxCore::DebugPrint( const char *pString )
 }
 
 //----------------------------------------------------------
+// CrOS-Pi: emit "EVT <name>" for the Raspberry Pi
+//----------------------------------------------------------
+void CCrowboxCore::ReportEvent( const char *pName )
+{
+#if defined( CROS_USE_SERIAL_EVENTS )
+  Serial.print( "EVT " );
+  Serial.println( pName );
+#endif// CROS_USE_SERIAL_EVENTS
+}
+
+//----------------------------------------------------------
+// CrOS-Pi: emit "EVT <name> <value>" for the Raspberry Pi
+//----------------------------------------------------------
+void CCrowboxCore::ReportEvent( const char *pName, int value )
+{
+#if defined( CROS_USE_SERIAL_EVENTS )
+  Serial.print( "EVT " );
+  Serial.print( pName );
+  Serial.print( ' ' );
+  Serial.println( value );
+#endif// CROS_USE_SERIAL_EVENTS
+}
+
+//----------------------------------------------------------
 // Once we get here, we never leave. The arduino stays in a
 // state where the indicator LED will blink out the error
 // code so that the human operator can get an idea of what
@@ -89,16 +113,21 @@ CCrowboxCore::CCrowboxCore()
     
     // Initialize this to never for now. It will come to use 
     // later as birds come and go.
-    m_uptimeScheduledBasketClose = TIME_NEVER;    
+    m_uptimeScheduledBasketClose = TIME_NEVER;
+
+    // CrOS-Pi: nothing reported yet, perch empty
+    m_numUnreportedDeposits = 0;
+    m_isPerchOccupied = false;
+    m_uptimePerchLastPressed = TIME_NEVER;
 }
 
 //----------------------------------------------------------
 //----------------------------------------------------------
 void CCrowboxCore::Setup()
 {
-#if defined( CROS_USE_SERIAL_DEBUG )
-    Serial.begin( CROS_SERIAL_BAUD_RATE ); 
-#endif//CROS_USE_SERIAL_DEBUG
+#if defined( CROS_USE_SERIAL_DEBUG ) || defined( CROS_USE_SERIAL_EVENTS )
+    Serial.begin( CROS_SERIAL_BAUD_RATE );
+#endif//CROS_USE_SERIAL_DEBUG || CROS_USE_SERIAL_EVENTS
  
     DebugPrint( "Setup() method CALLED...\n" );
  
@@ -183,6 +212,9 @@ void CCrowboxCore::Setup()
     delay( 1000 );
 
     DebugPrint( "  Up and running!\n\n" );
+
+    // CrOS-Pi: let the Pi know which phase we're in
+    ReportEvent( "PHASE", m_currentTrainingPhase );
 }
 
 //----------------------------------------------------------
@@ -250,6 +282,10 @@ void CCrowboxCore::Loop()
     // Poll to see if the human operator has pressed the switch which is
     // used to change the selected training phase.
     CheckTrainingPhaseSwitch();
+
+    // CrOS-Pi: report arrivals and deposits to the Pi
+    ReportPerchEvents();
+    ReportCoinEvents();
 
     // Now we do some time arithmetic to figure out how long this loop took to
     // execute. If it's less than IDEAL_LOOP_MS, then we make the system 
@@ -362,7 +398,8 @@ bool CCrowboxCore::EnqueueCoin()
         return false;
     }
     
-    m_numEnqueuedDeposits++;    
+    m_numEnqueuedDeposits++;
+    m_numUnreportedDeposits++;
     m_uptimeLastCoinDetected = GetUptimeSeconds();
     return true;
 }
@@ -457,8 +494,11 @@ void CCrowboxCore::OpenRewardBasket()
         // Give it time to finish. One second is more than enough time but
         // we need to ensure the servo finishes moving before detaching
         // the servo so we pad the time a little bit.
-        delay( 1000 ); 
-        DetachBasketServo(); 
+        delay( 1000 );
+        DetachBasketServo();
+
+        // CrOS-Pi: food is on offer
+        ReportEvent( "FEED" );
     }
     
     // Now we know the basket is open.
@@ -753,6 +793,50 @@ void CCrowboxCore::CheckTrainingPhaseSwitch()
 
   // Write it to the PROM now.
   WriteCurrentTrainingPhaseToEEPROM();
+
+  // CrOS-Pi: let the Pi know about the new phase
+  ReportEvent( "PHASE", m_currentTrainingPhase );
+}
+
+//----------------------------------------------------------
+// CrOS-Pi: phases 3 and 4 don't watch the perch at all, so
+// arrivals are tracked here for every phase. A press after
+// the perch has been released for EVENT_PERCH_DEPARTURE_DELAY
+// seconds is a new arrival; anything shorter is the same
+// bird hopping around (or contact bounce).
+//----------------------------------------------------------
+void CCrowboxCore::ReportPerchEvents()
+{
+  if( Poll_IsPerchPressed() )
+  {
+    if( !m_isPerchOccupied )
+    {
+      m_isPerchOccupied = true;
+      ReportEvent( "LAND" );
+    }
+    m_uptimePerchLastPressed = GetUptimeSeconds();
+  }
+  else if( m_isPerchOccupied && GetUptimeSeconds() - m_uptimePerchLastPressed >= EVENT_PERCH_DEPARTURE_DELAY )
+  {
+    m_isPerchOccupied = false;
+  }
+}
+
+//----------------------------------------------------------
+// CrOS-Pi: the coin interrupt only counts deposits, the
+// serial port is touched here, outside the interrupt.
+//----------------------------------------------------------
+void CCrowboxCore::ReportCoinEvents()
+{
+  noInterrupts();
+  int numDeposits = m_numUnreportedDeposits;
+  m_numUnreportedDeposits = 0;
+  interrupts();
+
+  for( int i = 0 ; i < numDeposits ; ++i )
+  {
+    ReportEvent( "COIN" );
+  }
 }
 
 //----------------------------------------------------------

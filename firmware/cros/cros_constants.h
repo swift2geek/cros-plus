@@ -48,6 +48,27 @@
 //#define CROS_USE_SERIAL_DEBUG
 
 //======================================
+// CrOS-Pi: one-line machine-readable events
+// for the Raspberry Pi on the USB serial port:
+//   EVT LAND        a bird landed on the perch
+//   EVT COIN        a coin deposit was detected
+//   EVT FEED        the reward basket opened
+//   EVT PHASE <n>   current training phase (on boot and on change)
+// The Pi ignores every line that does not
+// start with "EVT ", so debug output may
+// be enabled at the same time.
+//======================================
+#define CROS_USE_SERIAL_EVENTS
+
+//======================================
+// CrOS-Pi: the perch must stay released this
+// long before the next press counts as a new
+// arrival, so a bird hopping around on the
+// perch is reported only once.
+//======================================
+#define EVENT_PERCH_DEPARTURE_DELAY  2.0f
+
+//======================================
 // How long an 'ideal' loop should take
 // to execute. If a Loop() call takes 
 // less time than this, we'll delay for
