@@ -1,75 +1,49 @@
 # cros-plus
 
-**Unofficial** fork of [CrOS](https://thecrowbox.com/wiki/doku.php?id=kit:cros_software), the firmware of the
-[CrowBox](https://www.thecrowbox.com/) 3rd Generation (a coin-operated feeder that teaches crows and magpies
-to trade coins for peanuts). It runs the box on an **ESP32 over WiFi**, reports every visit to a host and
-lets an outdoor **IP camera stream the box live** to YouTube, with the stream and the log running in Docker
-on a NAS. Stock **Arduino Uno** hardware keeps working too.
+Live-stream an **official, unmodified [CrowBox](https://www.thecrowbox.com/) 3rd Generation** (a coin-operated
+feeder that teaches crows and magpies to trade coins for peanuts) with a **separate outdoor IP camera**,
+streamed to YouTube from a NAS in Docker. The box itself is built exactly as the CrowBox documentation says;
+the camera only watches it.
 
-Not affiliated with the CrowBox project. Upstream publishes CrOS as a zip on its wiki; the first commit here
-is that zip, unmodified, so `git log` shows exactly what changed.
+Not affiliated with the CrowBox project.
 
 ```
  outdoors                                            indoors (24/7, e.g. Synology NAS)
-┌──────────────────────────┐                        ┌───────────────────────────────┐
-│ CrowBox + ESP32 (CrOS)   │◀──WiFi, TCP 7777─────▶│ feeder: events.jsonl,         │
-│ perch, coin sensor, servo│   EVT … / CMD …        │ snapshot per coin, commands   │
-└──────────────────────────┘                        │                               │
- IP camera (RTSP, H.264) ───────WiFi / PoE─────────▶│ stream: RTSP → YouTube Live   │──▶ YouTube
-                                                    └───────────────────────────────┘
+┌──────────────────────────┐
+│ CrowBox 3rd Gen, stock   │                        ┌───────────────────────────────┐
+│ (official BOM, Uno,      │                        │ Docker: stream                │
+│  stock CrOS firmware)    │                        │ RTSP → YouTube Live           │──▶ YouTube
+└──────────────────────────┘                        └───────────────────────────────┘
+ IP camera (RTSP, H.264) ───────WiFi / PoE───────────────────▲
 ```
 
-## What's different from stock CrOS v1.0
+## 1. Build the box — the official way
 
-| | |
-|---|---|
-| **ESP32 + WiFi** | the same firmware builds for an ESP32 DevKit and talks to the host over TCP; nothing but power has to reach the box ([docs/esp32.md](docs/esp32.md)) |
-| **Reports events** | one line per event: `EVT LAND`, `LEAVE`, `COIN`, `FEED`, `CLOSE`, `PHASE <n>`, `ALIVE <uptime>` |
-| **Takes commands** | `CMD STATUS`, `CMD PHASE <1-4>`, `CMD OPEN`, `CMD CLOSE`: change the phase or open the lid without walking out to the box |
-| **Runs for months** | stock timing broke after ~49.7 days (`millis()` wrap, a known `@@@BUG`); all timing is now wrap-safe |
-| **Watchdog** | on the Uno, a hung board reboots by itself and parks the lid |
-| **Phase change fixes** | coins dropped in phases 1–2 no longer pile up and pay out a burst of lid openings in phase 3; a lid left open by phase 1 no longer stays open forever in phases 3–4 |
+Follow the CrowBox documentation as is: [BOM](https://thecrowbox.com/wiki/doku.php?id=kit:crowbox2_v20_bom),
+[assembly videos](https://youtube.com/playlist?list=PL55RinDSPfVUPfaxLV2Ef9dEO8SEhEmbo),
+[wiring guide and templates](https://thecrowbox.com/wiki/doku.php?id=kit:tools_and_helpers),
+[stock CrOS firmware](https://thecrowbox.com/wiki/doku.php?id=kit:cros_software).
+Get it working on the bench before adding anything.
 
-All changes are marked `cros-plus` in the source and can be switched off in `cros_constants.h`. Behavior that keeps birds safe (slow, stepwise lid closing) is untouched.
-Protocol: [docs/serial-protocol.md](docs/serial-protocol.md).
+## 2. Add the camera and the stream
 
-## Layout
+- An outdoor IP camera with **RTSP** and **H.264** (not only H.265), keyframe interval ≤ 4 s, ideally IR for dusk.
+  Fixed-focus cameras are sharp from roughly 60–100 cm: mount it that far from the perch, aimed at the perch and the coin slot.
+  It does not connect to the box in any way.
+- On any always-on Docker host (written for Synology):
 
-```
-firmware/cros/   CrOS sketch for ESP32 DevKit or Arduino Uno (Arduino IDE / arduino-cli)
-host/            Docker: IP camera → YouTube, feeder bridge, crowbox-cmd
-docs/            protocol, ESP32 wiring and flashing, host setup
-```
+  ```bash
+  cd host
+  cp .env.example .env     # STREAM_KEY and CAMERA_URL are all the stream needs
+  docker compose up -d --build stream
+  ```
 
-## Hardware
-
-The stock CrowBox 3rd Gen ([BOM](https://thecrowbox.com/wiki/doku.php?id=kit:crowbox2_v20_bom)), with two swaps:
-
-- **ESP32 DevKit** (ESP32-WROOM-32) instead of the Arduino Uno — wiring in [docs/esp32.md](docs/esp32.md).
-  A Uno works too; it then needs a USB cable to the host.
-- An outdoor **IP camera** with RTSP and H.264, mounted 60–100 cm from the perch.
-
-## Firmware
-
-```bash
-cp firmware/cros/wifi_config.example.h firmware/cros/wifi_config.h   # ESP32: WiFi name and password
-arduino-cli compile --fqbn esp32:esp32:esp32 firmware/cros           # or arduino:avr:uno
-arduino-cli upload  --fqbn esp32:esp32:esp32 -p <port> firmware/cros
-```
-
-Toolchain setup and details: [docs/esp32.md](docs/esp32.md). For a Uno: `arduino-cli lib install Servo`,
-FQBN `arduino:avr:uno`, no `wifi_config.h` needed.
-
-## Host
-
-```bash
-cd host
-cp .env.example .env     # stream key, camera RTSP URL, box address
-docker compose up -d --build
-docker compose exec feeder crowbox-cmd STATUS
-```
+  The video is copied, not re-encoded, so a small NAS handles it easily. A silent audio track is added
+  (YouTube often rejects streams without audio), or the camera microphone with `STREAM_AUDIO=camera`.
 
 Synology walkthrough and camera settings: [docs/synology.md](docs/synology.md).
+
+**Status:** tested end to end in Docker against a simulated camera and a local RTMP server; not yet with a real camera.
 
 ## Coins in the eurozone
 
@@ -77,10 +51,34 @@ The CrowBox takes coins up to 25.75 mm. For training coins upstream recommends 2
 users report that **50 euro cent** coins work very well, 20 cent coins occasionally jam
 ([CrowBox wiki](https://thecrowbox.com/wiki/doku.php?id=kit:training_coins)).
 
-## Status
+## Experimental — not tested on hardware
 
-Compiles for the ESP32 DevKit and the Arduino Uno; the host bridge is tested against a simulated box.
-Not yet run on real hardware: issues and reports are welcome.
+Everything below compiles but has **never run on a real box**. Don't use it for your first build;
+the stock firmware is the reference.
+
+`firmware/cros/` is a fork of CrOS v1.0. The first commit is the upstream zip, unmodified, so `git log` shows
+exactly what changed; all changes are marked `cros-plus` in the source and can be switched off in `cros_constants.h`.
+Behavior that keeps birds safe (slow, stepwise lid closing) is untouched.
+
+| | |
+|---|---|
+| **Bug fixes for the stock Uno build** | wrap-safe timing (stock code breaks after ~49.7 days of uptime, a known `@@@BUG`); coins dropped in phases 1–2 no longer pay out a burst of lid openings in phase 3; a lid left open by phase 1 no longer stays open in phases 3–4; a race on the coin counter; an 8 s watchdog |
+| **Events and commands** | `EVT LAND/LEAVE/COIN/FEED/CLOSE/PHASE/ALIVE` out, `CMD STATUS/PHASE/OPEN/CLOSE` in, over USB serial — [docs/serial-protocol.md](docs/serial-protocol.md) |
+| **ESP32 instead of the Uno** | the same sketch builds for an ESP32 DevKit and talks over WiFi (TCP 7777) — [docs/esp32.md](docs/esp32.md). Note: ESP32 logic is 3.3 V, the Uno is 5 V; the HS-311 servo is not verified on 3.3 V signal and ESP32 pins must never see 5 V |
+| **Feeder bridge** | `host/` service `feeder`: logs every event, grabs a camera snapshot per coin, forwards commands — needs the events above |
+
+```bash
+arduino-cli compile --fqbn arduino:avr:uno firmware/cros        # Uno (lib: Servo)
+arduino-cli compile --fqbn esp32:esp32:esp32 firmware/cros      # ESP32 (lib: ESP32Servo, needs wifi_config.h)
+```
+
+## Layout
+
+```
+host/            Docker: stream (camera → YouTube); experimental feeder bridge
+docs/            Synology setup; experimental: protocol, ESP32
+firmware/cros/   experimental CrOS fork for Arduino Uno / ESP32
+```
 
 ## License
 
