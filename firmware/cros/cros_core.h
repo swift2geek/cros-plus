@@ -79,7 +79,9 @@ protected:
     bool Poll_IsPerchPressed();
     
     void ScheduleBasketCloseWithDelay( cros_time_t delayInSeconds );
-    
+
+    static bool HasElapsed( cros_ms_t since, cros_time_t seconds );
+
     //--------------------------------------
     // Training Protocol
     //--------------------------------------
@@ -113,16 +115,35 @@ protected:
     void StopRecordingVideo();
 
 private:
-    cros_time_t m_uptimeWhenBirdLanded;
-    cros_time_t m_uptimeWhenBirdDeparted;
-    cros_time_t m_uptimeScheduledBasketClose;
-    cros_time_t m_uptimeLastCoinDetected;
-    
+    //--------------------------------------
+    // CrOS-Pi: all moments are millis() values
+    // paired with a flag, instead of float
+    // uptimes compared against each other,
+    // which broke after ~49.7 days of running
+    //--------------------------------------
+    cros_ms_t   m_msBirdLanded;
+    cros_ms_t   m_msBirdDeparted;
+    bool        m_isBirdOnPerch;
+    bool        m_hasBirdDeparted;
+
+    cros_ms_t   m_msBasketCloseScheduled;
+    cros_time_t m_basketCloseDelay;
+    bool        m_isBasketCloseScheduled;
+
+    volatile cros_ms_t m_msLastCoinDetected;
+
+    //--------------------------------------
+    // Uptime that survives millis() wrapping
+    //--------------------------------------
+    cros_ms_t    m_msLastLoopBegan;
+    unsigned int m_numMillisWraps;
+
     //--------------------------------------
     // This semaphore is used to begin recording video
     // or to extend recording time if already doing so
     //--------------------------------------
-    cros_time_t m_uptimeStopRecordingVideo;
+    cros_ms_t   m_msVideoStarted;
+    cros_time_t m_videoDuration;
     bool        m_isRecordingVideo;
 
     //--------------------------------------
@@ -158,7 +179,7 @@ private:
     //--------------------------------------
     volatile int m_numUnreportedDeposits;
     bool         m_isPerchOccupied;
-    cros_time_t  m_uptimePerchLastPressed;
+    cros_ms_t    m_msPerchLastPressed;
 
     //--------------------------------------
     // The servo which controls the lid that

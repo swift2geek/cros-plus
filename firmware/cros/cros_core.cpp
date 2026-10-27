@@ -12,6 +12,7 @@
 //   International License
 //==========================================================
 #include <EEPROM.h>
+#include <avr/wdt.h>
 #include "cros_core.h"
 
 //==========================================================
@@ -74,6 +75,10 @@ void CCrowboxCore::ReportEvent( const char *pName, int value )
 //----------------------------------------------------------
 void CCrowboxCore::ReportSystemError( cros_error_code_t errorCode )
 {
+  // CrOS-Pi: keep blinking the error instead of letting the
+  // watchdog reboot into the same error over and over
+  wdt_disable();
+
   digitalWrite( OUTPUT_PIN_LED, LOW );
 
   while( 1 )
@@ -106,25 +111,41 @@ CCrowboxCore::CCrowboxCore()
     // parked when the Core's Setup() method is called.
     m_basketState = BASKET_STATE_DONT_KNOW;
     
-    // This pair of timers store the Uptime of the most recent
+    // This pair of timers store the moment of the most recent
     // arrival (depression of perch) and departure (release of perch).
-    m_uptimeWhenBirdLanded = TIME_NEVER;
-    m_uptimeWhenBirdDeparted = TIME_NEVER;
-    
-    // Initialize this to never for now. It will come to use 
+    m_msBirdLanded = 0;
+    m_msBirdDeparted = 0;
+    m_isBirdOnPerch = false;
+    m_hasBirdDeparted = false;
+
+    // Nothing scheduled for now. It will come to use
     // later as birds come and go.
-    m_uptimeScheduledBasketClose = TIME_NEVER;
+    m_msBasketCloseScheduled = 0;
+    m_basketCloseDelay = 0.0f;
+    m_isBasketCloseScheduled = false;
+
+    m_msLastCoinDetected = 0;
+    m_msLastLoopBegan = 0;
+    m_numMillisWraps = 0;
+
+    m_msVideoStarted = 0;
+    m_videoDuration = 0.0f;
+    m_isRecordingVideo = false;
 
     // CrOS-Pi: nothing reported yet, perch empty
     m_numUnreportedDeposits = 0;
     m_isPerchOccupied = false;
-    m_uptimePerchLastPressed = TIME_NEVER;
+    m_msPerchLastPressed = 0;
 }
 
 //----------------------------------------------------------
 //----------------------------------------------------------
 void CCrowboxCore::Setup()
 {
+    // CrOS-Pi: a watchdog left running by a previous reset must not
+    // fire during the slow servo parking below
+    wdt_disable();
+
 #if defined( CROS_USE_SERIAL_DEBUG ) || defined( CROS_USE_SERIAL_EVENTS )
     Serial.begin( CROS_SERIAL_BAUD_RATE );
 #endif//CROS_USE_SERIAL_DEBUG || CROS_USE_SERIAL_EVENTS
@@ -202,8 +223,7 @@ void CCrowboxCore::Setup()
     CloseRewardBasket();
 
     // Set the sentinel that protects us from contact bounce on coin deposits.
-    // Do this by setting it to the current time plus a little bit of slop.
-    m_uptimeLastCoinDetected = GetUptimeSeconds() + 0.1f;
+    m_msLastCoinDetected = millis();
 
     // Ensure video is not being recorded
     StopRecordingVideo();
@@ -215,6 +235,11 @@ void CCrowboxCore::Setup()
 
     // CrOS-Pi: let the Pi know which phase we're in
     ReportEvent( "PHASE", m_currentTrainingPhase );
+
+#if defined( CROS_USE_WATCHDOG )
+    // CrOS-Pi: reboot by itself if the code ever hangs
+    wdt_enable( WDTO_8S );
+#endif//CROS_USE_WATCHDOG
 }
 
 //----------------------------------------------------------
@@ -224,21 +249,31 @@ void CCrowboxCore::Loop()
     // Take a quick sample of the uptime in milliseconds. We'll use this value
     // near the end of this function to determine how long this call to Loop()
     // will take.
-    unsigned long msWhenLoopBegan = millis();
+    cros_ms_t msWhenLoopBegan = millis();
 
-    // If the basket is scheduled to close on a timer and it is time to close 
-    // the basket, then close it. Placing this code here makes automated closing 
+    // CrOS-Pi: still alive
+    wdt_reset();
+
+    // CrOS-Pi: count millis() wrap-arounds for GetUptimeSeconds()
+    if( msWhenLoopBegan < m_msLastLoopBegan )
+    {
+        m_numMillisWraps++;
+    }
+    m_msLastLoopBegan = msWhenLoopBegan;
+
+    // If the basket is scheduled to close on a timer and it is time to close
+    // the basket, then close it. Placing this code here makes automated closing
     // of the basket a system-level service that takes place no matter which phase
     // of training is currently being observed.
-    if( IsRewardBasketOpen() && m_uptimeScheduledBasketClose != TIME_NEVER ) 
+    if( IsRewardBasketOpen() && m_isBasketCloseScheduled )
     {
         // If the basket is open and a close command is scheduled
         // then check to see if it's time to shut the basket
-        if( GetUptimeSeconds() >= m_uptimeScheduledBasketClose )
+        if( HasElapsed( m_msBasketCloseScheduled, m_basketCloseDelay ) )
         {
           // Close the basket and de-schedule
           CloseRewardBasket();
-          m_uptimeScheduledBasketClose = TIME_NEVER;
+          m_isBasketCloseScheduled = false;
         }
     }
     
@@ -273,7 +308,7 @@ void CCrowboxCore::Loop()
     if( m_isRecordingVideo )
     {
         // Should we turn off?
-        if( GetUptimeSeconds() >= m_uptimeStopRecordingVideo )
+        if( HasElapsed( m_msVideoStarted, m_videoDuration ) )
         {
             StopRecordingVideo();
         }
@@ -302,38 +337,35 @@ void CCrowboxCore::Loop()
 }  
 
 //----------------------------------------------------------
-// Uptime is computed and converted to seconds each time 
-// this method is called. 
+// Uptime in seconds since boot, for reporting only.
 //
-// @@@BUG - The way this is implemented, a CrowBox that runs
-// continuously for around 40 days will run into problems
-// when the float value rolls over. This is easily avoided 
-// by manually resetting the CrowBox each time the food or 
-// coins needs to be refilled.
+// CrOS-Pi: the stock version broke after ~40-50 days, when
+// millis() wraps around and the float uptimes compared all
+// over the code jumped back to zero. Timing no longer uses
+// this method (see HasElapsed()), and the wrap-arounds are
+// counted in Loop() so the reported uptime keeps growing.
 //----------------------------------------------------------
 cros_time_t CCrowboxCore::GetUptimeSeconds()
 {
-  // Grab the current Arduino uptime in milliseconds
-  unsigned long currentTimeMS = millis();
-  
-  // Convert down to seconds. Use a double to protect
-  // precision and range.
-  double currentTimeSeconds = (double)currentTimeMS;
-  currentTimeSeconds /= 1000.0;
-  
-  // Downconvert to a float and return
-  return ((cros_time_t)currentTimeSeconds);    
+  return m_numMillisWraps * 4294967.296f + millis() / 1000.0f;
 }
 
 //----------------------------------------------------------
-// Simple logic- if the timer that tells us the last time
-// a bird landed is more recent than the timer that tells us
-// the last time a bird departed, then there is a bird present
-// right now.
+// CrOS-Pi: true once at least 'seconds' have passed since
+// the moment 'since'. Unsigned subtraction keeps this right
+// across a millis() wrap-around.
+//----------------------------------------------------------
+bool CCrowboxCore::HasElapsed( cros_ms_t since, cros_time_t seconds )
+{
+  return millis() - since >= (cros_ms_t)( seconds * 1000.0f );
+}
+
+//----------------------------------------------------------
+// A bird is present between a landing and the next departure.
 //----------------------------------------------------------
 bool CCrowboxCore::IsABirdOnThePerch()
 {
-  return (m_uptimeWhenBirdLanded > m_uptimeWhenBirdDeparted );
+  return m_isBirdOnPerch;
 }
 
 //----------------------------------------------------------
@@ -343,26 +375,26 @@ bool CCrowboxCore::IsABirdOnThePerch()
 //----------------------------------------------------------
 cros_time_t CCrowboxCore::HowLongHasBirdBeenHere()
 {
-  if( m_uptimeWhenBirdLanded == TIME_NEVER )
+  if( !m_isBirdOnPerch )
   {
     return TIME_NEVER;
   }
 
-  return GetUptimeSeconds() - m_uptimeWhenBirdLanded;
+  return ( millis() - m_msBirdLanded ) / 1000.0f;
 }
 
 //----------------------------------------------------------
-// If you call this while a bird is present, you'll get 
+// If you call this while a bird is present, you'll get
 // garbage. First make sure there's no bird present
 //----------------------------------------------------------
 cros_time_t CCrowboxCore::HowLongHasBirdBeenGone()
 {
-  if( m_uptimeWhenBirdDeparted == TIME_NEVER )
+  if( m_isBirdOnPerch || !m_hasBirdDeparted )
   {
     return TIME_NEVER;
   }
 
-  return GetUptimeSeconds() - m_uptimeWhenBirdDeparted;
+  return ( millis() - m_msBirdDeparted ) / 1000.0f;
 }
 
 //----------------------------------------------------------
@@ -383,7 +415,7 @@ cros_time_t CCrowboxCore::HowLongHasBirdBeenGone()
 //----------------------------------------------------------
 bool CCrowboxCore::EnqueueCoin()              
 {
-    if( GetUptimeSeconds() - m_uptimeLastCoinDetected < 1.0f )
+    if( !HasElapsed( m_msLastCoinDetected, 1.0f ) )
     {
         // We must only accept one coin deposit per second. Because of the
         // type of switch we use to detect coin deposits (a conductive copper
@@ -406,7 +438,7 @@ bool CCrowboxCore::EnqueueCoin()
         m_numEnqueuedDeposits++;
     }
     m_numUnreportedDeposits++;
-    m_uptimeLastCoinDetected = GetUptimeSeconds();
+    m_msLastCoinDetected = millis();
     return true;
 }
 
@@ -561,6 +593,9 @@ void CCrowboxCore::CloseRewardBasket()
       servoPosition -= servoStepSize;
       m_basketServo.write( servoPosition );
       delay( BASKET_CLOSE_STEP_DELAY_MS );
+
+      // CrOS-Pi: closing takes longer than the watchdog timeout
+      wdt_reset();
       DebugPrint("...basket step...");
     }   
   }
@@ -599,7 +634,9 @@ bool CCrowboxCore::Poll_IsPerchPressed()
 //----------------------------------------------------------
 void CCrowboxCore::ScheduleBasketCloseWithDelay( cros_time_t delayInSeconds )
 {
-    m_uptimeScheduledBasketClose = GetUptimeSeconds() + delayInSeconds;
+    m_msBasketCloseScheduled = millis();
+    m_basketCloseDelay = delayInSeconds;
+    m_isBasketCloseScheduled = true;
 }
 
 //----------------------------------------------------------
@@ -624,7 +661,7 @@ void CCrowboxCore::RunPhaseOneProtocol()
       // In fact, make sure we squash the scheduled close order 
       // in case there is one. For the record, this is probably 
       // an unnecessary level of assurance. No such thing, I say!
-      m_uptimeScheduledBasketClose = TIME_NEVER;
+      m_isBasketCloseScheduled = false;
   }
   
   // If a bird is on the perch, logically speaking- This means
@@ -646,7 +683,9 @@ void CCrowboxCore::RunPhaseOneProtocol()
       // Just record the time of departure. The lid will close in
       // a little while, as a result of the call to ScheduleBasketCloseWithDelay()
       // that was issued when this bird arrived.
-      m_uptimeWhenBirdDeparted = GetUptimeSeconds();
+      m_msBirdDeparted = millis();
+      m_isBirdOnPerch = false;
+      m_hasBirdDeparted = true;
     }
   }
   else 
@@ -658,8 +697,9 @@ void CCrowboxCore::RunPhaseOneProtocol()
     {
       // EDGE CASE: A new bird has arrived!
       DebugPrint( "A customer has landed on the perch!\n" );
-      m_uptimeWhenBirdLanded = GetUptimeSeconds();
-      RecordVideo( VIDEO_RECORD_DURATION_ARRIVAL );    
+      m_msBirdLanded = millis();
+      m_isBirdOnPerch = true;
+      RecordVideo( VIDEO_RECORD_DURATION_ARRIVAL );
     }
   }  
 }
@@ -686,11 +726,13 @@ void CCrowboxCore::RunPhaseTwoProtocol()
     // we need to handle that.
     if( !Poll_IsPerchPressed() )
     {
-      DebugPrint( "Customer has left the perch!\n" );      
+      DebugPrint( "Customer has left the perch!\n" );
       // Just record the time of departure. The lid will close in
       // a little while, as a result of the call to ScheduleBasketCloseWithDelay()
       // that was issued when this bird arrived.
-      m_uptimeWhenBirdDeparted = GetUptimeSeconds();
+      m_msBirdDeparted = millis();
+      m_isBirdOnPerch = false;
+      m_hasBirdDeparted = true;
     }
   }
   else 
@@ -702,7 +744,8 @@ void CCrowboxCore::RunPhaseTwoProtocol()
     {
       // EDGE CASE: A new bird has arrived!
       DebugPrint( "A customer has landed on the perch!\n" );
-      m_uptimeWhenBirdLanded = GetUptimeSeconds();
+      m_msBirdLanded = millis();
+      m_isBirdOnPerch = true;
 
       RecordVideo( VIDEO_RECORD_DURATION_ARRIVAL );    
 
@@ -792,6 +835,7 @@ void CCrowboxCore::CheckTrainingPhaseSwitch()
   {
     // Waste time until the person releases the switch.
     delay( 10 );
+    wdt_reset();
   };
   
   AdvanceCurrentTrainingPhase();
@@ -842,9 +886,9 @@ void CCrowboxCore::ReportPerchEvents()
       m_isPerchOccupied = true;
       ReportEvent( "LAND" );
     }
-    m_uptimePerchLastPressed = GetUptimeSeconds();
+    m_msPerchLastPressed = millis();
   }
-  else if( m_isPerchOccupied && GetUptimeSeconds() - m_uptimePerchLastPressed >= EVENT_PERCH_DEPARTURE_DELAY )
+  else if( m_isPerchOccupied && HasElapsed( m_msPerchLastPressed, EVENT_PERCH_DEPARTURE_DELAY ) )
   {
     m_isPerchOccupied = false;
   }

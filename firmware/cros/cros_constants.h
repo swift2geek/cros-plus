@@ -69,6 +69,16 @@
 #define EVENT_PERCH_DEPARTURE_DELAY  2.0f
 
 //======================================
+// CrOS-Pi: hardware watchdog. If Loop()
+// stops running for 8 seconds (a hang,
+// a glitch from a noisy servo supply),
+// the Arduino reboots on its own and
+// parks the lid again instead of sitting
+// frozen until someone walks out to it.
+//======================================
+#define CROS_USE_WATCHDOG
+
+//======================================
 // How long an 'ideal' loop should take
 // to execute. If a Loop() call takes 
 // less time than this, we'll delay for

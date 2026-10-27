@@ -25,5 +25,14 @@
 //--------------------------------------
 typedef float cros_time_t;
 
+//--------------------------------------
+// CrOS-Pi: a moment in time, as returned
+// by millis(). Two of these are only ever
+// compared by subtracting them (see
+// HasElapsed()), which stays correct when
+// millis() wraps around after ~49.7 days.
+//--------------------------------------
+typedef unsigned long cros_ms_t;
+
 #endif//CROS_TYPES_H
 
