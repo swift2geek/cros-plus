@@ -1,0 +1,14 @@
+[Unit]
+Description=CrowBox live stream
+After=network-online.target mediamtx.service
+Wants=network-online.target mediamtx.service
+
+[Service]
+EnvironmentFile=/etc/crowbox.env
+ExecStart=/usr/local/bin/crowbox-stream.sh
+Restart=always
+RestartSec=10
+User=pi
+
+[Install]
+WantedBy=multi-user.target

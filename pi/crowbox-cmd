@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+# Send a command to the CrowBox through crowbox-feeder: crowbox-cmd STATUS | OPEN | CLOSE | PHASE <1-4>
+# Replies (EVT STATUS, EVT ERR) show up in: journalctl -u crowbox-feeder, ~/crowbox-data/events.jsonl
+set -euo pipefail
+
+FIFO=/run/crowbox/cmd
+[[ $# -gt 0 ]] || { echo "usage: crowbox-cmd STATUS | OPEN | CLOSE | PHASE <1-4>" >&2; exit 2; }
+[[ -p $FIFO ]] || { echo "crowbox-feeder is not running ($FIFO missing)" >&2; exit 1; }
+
+echo "CMD $*" > "$FIFO"

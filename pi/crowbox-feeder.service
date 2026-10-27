@@ -1,0 +1,16 @@
+[Unit]
+Description=CrowBox feeder bridge (events, snapshots, commands)
+After=mediamtx.service
+Wants=mediamtx.service
+
+[Service]
+ExecStart=/usr/bin/python3 /usr/local/bin/crowbox_feeder.py
+Restart=always
+RestartSec=5
+User=pi
+SupplementaryGroups=dialout
+RuntimeDirectory=crowbox
+RuntimeDirectoryPreserve=yes
+
+[Install]
+WantedBy=multi-user.target
