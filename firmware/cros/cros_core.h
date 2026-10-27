@@ -44,6 +44,7 @@ public:
     void DebugPrint( const char *pString );
     void ReportEvent( const char *pName );
     void ReportEvent( const char *pName, int value );
+    void ReportEvent( const char *pName, unsigned long value );
     void ReportSystemError( cros_error_code_t errorCode );
     
     //--------------------------------------
@@ -99,6 +100,7 @@ protected:
     //--------------------------------------
     void ReportPerchEvents();
     void ReportCoinEvents();
+    void ReportHeartbeat();
 
     //--------------------------------------
     // EEPROM Methods
@@ -180,6 +182,7 @@ private:
     volatile int m_numUnreportedDeposits;
     bool         m_isPerchOccupied;
     cros_ms_t    m_msPerchLastPressed;
+    cros_ms_t    m_msLastHeartbeat;
 
     //--------------------------------------
     // The servo which controls the lid that

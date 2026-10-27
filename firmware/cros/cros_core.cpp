@@ -63,6 +63,19 @@ void CCrowboxCore::ReportEvent( const char *pName, int value )
 }
 
 //----------------------------------------------------------
+// CrOS-Pi: same for values that don't fit an AVR int
+//----------------------------------------------------------
+void CCrowboxCore::ReportEvent( const char *pName, unsigned long value )
+{
+#if defined( CROS_USE_SERIAL_EVENTS )
+  Serial.print( "EVT " );
+  Serial.print( pName );
+  Serial.print( ' ' );
+  Serial.println( value );
+#endif// CROS_USE_SERIAL_EVENTS
+}
+
+//----------------------------------------------------------
 // Once we get here, we never leave. The arduino stays in a
 // state where the indicator LED will blink out the error
 // code so that the human operator can get an idea of what
@@ -136,6 +149,7 @@ CCrowboxCore::CCrowboxCore()
     m_numUnreportedDeposits = 0;
     m_isPerchOccupied = false;
     m_msPerchLastPressed = 0;
+    m_msLastHeartbeat = 0;
 }
 
 //----------------------------------------------------------
@@ -321,6 +335,7 @@ void CCrowboxCore::Loop()
     // CrOS-Pi: report arrivals and deposits to the Pi
     ReportPerchEvents();
     ReportCoinEvents();
+    ReportHeartbeat();
 
     // Now we do some time arithmetic to figure out how long this loop took to
     // execute. If it's less than IDEAL_LOOP_MS, then we make the system 
@@ -561,8 +576,10 @@ void CCrowboxCore::OpenRewardBasket()
 void CCrowboxCore::CloseRewardBasket()
 {
   DebugPrint( "  Reward Basket CLOSING...\n");
-  
-  if( IsRewardBasketOpen() )
+
+  bool wasOpen = IsRewardBasketOpen();
+
+  if( wasOpen )
   {
     // Ensure the basket servo is attached
     AttachBasketServo();
@@ -611,7 +628,12 @@ void CCrowboxCore::CloseRewardBasket()
   // clicking or whining after the servo has finished moving. Detaching the servo
   // will eliminate the signal that the Arduino is constantly sending to the servo.
   DetachBasketServo();
-  
+
+  if( wasOpen )
+  {
+    ReportEvent( "CLOSE" );
+  }
+
   DebugPrint( "Reward basket closed and locked\n" );
 }
 
@@ -891,7 +913,23 @@ void CCrowboxCore::ReportPerchEvents()
   else if( m_isPerchOccupied && HasElapsed( m_msPerchLastPressed, EVENT_PERCH_DEPARTURE_DELAY ) )
   {
     m_isPerchOccupied = false;
+    ReportEvent( "LEAVE" );
   }
+}
+
+//----------------------------------------------------------
+// CrOS-Pi: a sign of life with the uptime, so the Pi can tell
+// a quiet box from a dead or unplugged one
+//----------------------------------------------------------
+void CCrowboxCore::ReportHeartbeat()
+{
+  if( !HasElapsed( m_msLastHeartbeat, EVENT_HEARTBEAT_INTERVAL ) )
+  {
+    return;
+  }
+
+  m_msLastHeartbeat = millis();
+  ReportEvent( "ALIVE", (unsigned long)GetUptimeSeconds() );
 }
 
 //----------------------------------------------------------

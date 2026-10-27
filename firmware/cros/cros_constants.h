@@ -51,9 +51,12 @@
 // CrOS-Pi: one-line machine-readable events
 // for the Raspberry Pi on the USB serial port:
 //   EVT LAND        a bird landed on the perch
+//   EVT LEAVE       the perch has been empty for a moment
 //   EVT COIN        a coin deposit was detected
 //   EVT FEED        the reward basket opened
+//   EVT CLOSE       the reward basket finished closing
 //   EVT PHASE <n>   current training phase (on boot and on change)
+//   EVT ALIVE <s>   heartbeat with uptime in seconds
 // The Pi ignores every line that does not
 // start with "EVT ", so debug output may
 // be enabled at the same time.
@@ -67,6 +70,12 @@
 // perch is reported only once.
 //======================================
 #define EVENT_PERCH_DEPARTURE_DELAY  2.0f
+
+//======================================
+// CrOS-Pi: how often EVT ALIVE is sent, so
+// the Pi notices a dead or unplugged box
+//======================================
+#define EVENT_HEARTBEAT_INTERVAL  60.0f
 
 //======================================
 // CrOS-Pi: hardware watchdog. If Loop()
