@@ -3,8 +3,8 @@
 The Arduino Uno running CrOS talks to the Raspberry Pi over its USB cable:
 **57600 baud, 8N1, one line per message**, `\n` terminated (CrOS also accepts `\r\n`).
 
-Opening the port resets a Uno (DTR). After a reset CrOS spends about 15 seconds parking
-the lid before it sends anything.
+Opening the port resets a Uno (DTR). After a reset CrOS spends about 18 seconds parking
+the lid before it sends `EVT PHASE`.
 
 ## Events: Arduino → Pi
 
@@ -42,5 +42,5 @@ blinks the phase, so a command sent then waits in the Uno's 64-byte serial buffe
 |--------|---------|-|
 | `CROS_USE_SERIAL_EVENTS` | on | `EVT` lines |
 | `CROS_USE_SERIAL_COMMANDS` | on | `CMD` lines |
-| `CROS_USE_WATCHDOG` | on | 8 s hardware watchdog |
+| `CROS_USE_WATCHDOG` | on | 8 s hardware watchdog, AVR boards only (Uno R3). Needs the optiboot bootloader, standard on genuine Uno R3; clones with the old bootloader may reboot endlessly after the first watchdog reset — undefine it then |
 | `CROS_USE_SERIAL_DEBUG` | off | stock CrOS debug text (harmless to the Pi, it only reads `EVT` lines) |

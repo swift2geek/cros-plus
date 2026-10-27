@@ -12,8 +12,36 @@
 //   International License
 //==========================================================
 #include <EEPROM.h>
-#include <avr/wdt.h>
 #include "cros_core.h"
+#if defined( __AVR__ ) && defined( CROS_USE_WATCHDOG )
+#include <avr/wdt.h>
+#endif
+
+//==========================================================
+// CrOS-Pi: watchdog helpers. They do nothing unless
+// CROS_USE_WATCHDOG is defined and the board is an AVR
+// (Uno R3); other boards just run without a watchdog.
+//==========================================================
+static void WatchdogStart()
+{
+#if defined( __AVR__ ) && defined( CROS_USE_WATCHDOG )
+  wdt_enable( WDTO_8S );
+#endif
+}
+
+static void WatchdogFeed()
+{
+#if defined( __AVR__ ) && defined( CROS_USE_WATCHDOG )
+  wdt_reset();
+#endif
+}
+
+static void WatchdogStop()
+{
+#if defined( __AVR__ ) && defined( CROS_USE_WATCHDOG )
+  wdt_disable();
+#endif
+}
 
 //==========================================================
 // Interrupt function called when the coin sensor is struck
@@ -90,7 +118,7 @@ void CCrowboxCore::ReportSystemError( cros_error_code_t errorCode )
 {
   // CrOS-Pi: keep blinking the error instead of letting the
   // watchdog reboot into the same error over and over
-  wdt_disable();
+  WatchdogStop();
 
   digitalWrite( OUTPUT_PIN_LED, LOW );
 
@@ -161,7 +189,7 @@ void CCrowboxCore::Setup()
 {
     // CrOS-Pi: a watchdog left running by a previous reset must not
     // fire during the slow servo parking below
-    wdt_disable();
+    WatchdogStop();
 
 #if defined( CROS_USE_SERIAL_DEBUG ) || defined( CROS_USE_SERIAL_EVENTS ) || defined( CROS_USE_SERIAL_COMMANDS )
     Serial.begin( CROS_SERIAL_BAUD_RATE );
@@ -253,10 +281,8 @@ void CCrowboxCore::Setup()
     // CrOS-Pi: let the Pi know which phase we're in
     ReportEvent( "PHASE", m_currentTrainingPhase );
 
-#if defined( CROS_USE_WATCHDOG )
     // CrOS-Pi: reboot by itself if the code ever hangs
-    wdt_enable( WDTO_8S );
-#endif//CROS_USE_WATCHDOG
+    WatchdogStart();
 }
 
 //----------------------------------------------------------
@@ -269,7 +295,7 @@ void CCrowboxCore::Loop()
     cros_ms_t msWhenLoopBegan = millis();
 
     // CrOS-Pi: still alive
-    wdt_reset();
+    WatchdogFeed();
 
     // CrOS-Pi: count millis() wrap-arounds for GetUptimeSeconds()
     if( msWhenLoopBegan < m_msLastLoopBegan )
@@ -618,7 +644,7 @@ void CCrowboxCore::CloseRewardBasket()
       delay( BASKET_CLOSE_STEP_DELAY_MS );
 
       // CrOS-Pi: closing takes longer than the watchdog timeout
-      wdt_reset();
+      WatchdogFeed();
       DebugPrint("...basket step...");
     }   
   }
@@ -863,7 +889,7 @@ void CCrowboxCore::CheckTrainingPhaseSwitch()
   {
     // Waste time until the person releases the switch.
     delay( 10 );
-    wdt_reset();
+    WatchdogFeed();
   };
   
   AdvanceCurrentTrainingPhase();

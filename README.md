@@ -39,7 +39,7 @@ arduino-cli core install arduino:avr
 arduino-cli lib install Servo
 arduino-cli compile --fqbn arduino:avr:uno firmware/cros
 arduino-cli upload  --fqbn arduino:avr:uno -p <port> firmware/cros
-arduino-cli monitor -p <port> -c baudrate=57600     # EVT PHASE <n> appears ~15 s after boot
+arduino-cli monitor -p <port> -c baudrate=57600     # EVT PHASE <n> appears ~18 s after boot
 ```
 
 Or open `firmware/cros/cros.ino` in the Arduino IDE.
