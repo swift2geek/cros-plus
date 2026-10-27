@@ -26,7 +26,7 @@
 typedef float cros_time_t;
 
 //--------------------------------------
-// CrOS-Pi: a moment in time, as returned
+// cros-plus: a moment in time, as returned
 // by millis(). Two of these are only ever
 // compared by subtracting them (see
 // HasElapsed()), which stays correct when

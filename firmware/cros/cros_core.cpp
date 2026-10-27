@@ -18,7 +18,7 @@
 #endif
 
 //==========================================================
-// CrOS-Pi: watchdog helpers. They do nothing unless
+// cros-plus: watchdog helpers. They do nothing unless
 // CROS_USE_WATCHDOG is defined and the board is an AVR
 // (Uno R3); other boards just run without a watchdog.
 //==========================================================
@@ -51,7 +51,7 @@ static void WatchdogStop()
 // is designed to accept only one deposit per second so that 
 // each coin isn't counted multiple times due to contact bounce.
 //==========================================================
-void Interrupt_CoinDeposit()
+void CROS_ISR_ATTR Interrupt_CoinDeposit()
 {
     g_crOSCore.EnqueueCoin();
 }
@@ -67,39 +67,39 @@ void CCrowboxCore::DebugPrint( const char *pString )
 }
 
 //----------------------------------------------------------
-// CrOS-Pi: emit "EVT <name>" for the Raspberry Pi
+// cros-plus: emit "EVT <name>" for the host
 //----------------------------------------------------------
 void CCrowboxCore::ReportEvent( const char *pName )
 {
 #if defined( CROS_USE_SERIAL_EVENTS )
-  Serial.print( "EVT " );
-  Serial.println( pName );
+  g_crOSLink.print( "EVT " );
+  g_crOSLink.println( pName );
 #endif// CROS_USE_SERIAL_EVENTS
 }
 
 //----------------------------------------------------------
-// CrOS-Pi: emit "EVT <name> <value>" for the Raspberry Pi
+// cros-plus: emit "EVT <name> <value>" for the host
 //----------------------------------------------------------
 void CCrowboxCore::ReportEvent( const char *pName, int value )
 {
 #if defined( CROS_USE_SERIAL_EVENTS )
-  Serial.print( "EVT " );
-  Serial.print( pName );
-  Serial.print( ' ' );
-  Serial.println( value );
+  g_crOSLink.print( "EVT " );
+  g_crOSLink.print( pName );
+  g_crOSLink.print( ' ' );
+  g_crOSLink.println( value );
 #endif// CROS_USE_SERIAL_EVENTS
 }
 
 //----------------------------------------------------------
-// CrOS-Pi: same for values that don't fit an AVR int
+// cros-plus: same for values that don't fit an AVR int
 //----------------------------------------------------------
 void CCrowboxCore::ReportEvent( const char *pName, unsigned long value )
 {
 #if defined( CROS_USE_SERIAL_EVENTS )
-  Serial.print( "EVT " );
-  Serial.print( pName );
-  Serial.print( ' ' );
-  Serial.println( value );
+  g_crOSLink.print( "EVT " );
+  g_crOSLink.print( pName );
+  g_crOSLink.print( ' ' );
+  g_crOSLink.println( value );
 #endif// CROS_USE_SERIAL_EVENTS
 }
 
@@ -116,7 +116,7 @@ void CCrowboxCore::ReportEvent( const char *pName, unsigned long value )
 //----------------------------------------------------------
 void CCrowboxCore::ReportSystemError( cros_error_code_t errorCode )
 {
-  // CrOS-Pi: keep blinking the error instead of letting the
+  // cros-plus: keep blinking the error instead of letting the
   // watchdog reboot into the same error over and over
   WatchdogStop();
 
@@ -173,7 +173,7 @@ CCrowboxCore::CCrowboxCore()
     m_videoDuration = 0.0f;
     m_isRecordingVideo = false;
 
-    // CrOS-Pi: nothing reported yet, perch empty
+    // cros-plus: nothing reported yet, perch empty
     m_numUnreportedDeposits = 0;
     m_isPerchOccupied = false;
     m_msPerchLastPressed = 0;
@@ -187,14 +187,22 @@ CCrowboxCore::CCrowboxCore()
 //----------------------------------------------------------
 void CCrowboxCore::Setup()
 {
-    // CrOS-Pi: a watchdog left running by a previous reset must not
+    // cros-plus: a watchdog left running by a previous reset must not
     // fire during the slow servo parking below
     WatchdogStop();
 
 #if defined( CROS_USE_SERIAL_DEBUG ) || defined( CROS_USE_SERIAL_EVENTS ) || defined( CROS_USE_SERIAL_COMMANDS )
     Serial.begin( CROS_SERIAL_BAUD_RATE );
 #endif//CROS_USE_SERIAL_DEBUG || CROS_USE_SERIAL_EVENTS || CROS_USE_SERIAL_COMMANDS
- 
+
+    // cros-plus: start joining WiFi (ESP32) while the lid parks
+    g_crOSLink.Begin();
+
+#if defined( ESP32 )
+    // cros-plus: the ESP32 emulates EEPROM in flash and needs its size up front
+    EEPROM.begin( CROS_EEPROM_ADDRESS_TRAINING_PHASE + 1 );
+#endif
+
     DebugPrint( "Setup() method CALLED...\n" );
  
     // Start with no enqueued deposits
@@ -278,10 +286,10 @@ void CCrowboxCore::Setup()
 
     DebugPrint( "  Up and running!\n\n" );
 
-    // CrOS-Pi: let the Pi know which phase we're in
+    // cros-plus: let the host know which phase we're in
     ReportEvent( "PHASE", m_currentTrainingPhase );
 
-    // CrOS-Pi: reboot by itself if the code ever hangs
+    // cros-plus: reboot by itself if the code ever hangs
     WatchdogStart();
 }
 
@@ -294,10 +302,10 @@ void CCrowboxCore::Loop()
     // will take.
     cros_ms_t msWhenLoopBegan = millis();
 
-    // CrOS-Pi: still alive
+    // cros-plus: still alive
     WatchdogFeed();
 
-    // CrOS-Pi: count millis() wrap-arounds for GetUptimeSeconds()
+    // cros-plus: count millis() wrap-arounds for GetUptimeSeconds()
     if( msWhenLoopBegan < m_msLastLoopBegan )
     {
         m_numMillisWraps++;
@@ -361,12 +369,19 @@ void CCrowboxCore::Loop()
     // used to change the selected training phase.
     CheckTrainingPhaseSwitch();
 
-    // CrOS-Pi: report arrivals and deposits to the Pi
+    // cros-plus: report arrivals and deposits to the host
     ReportPerchEvents();
     ReportCoinEvents();
     ReportHeartbeat();
 
-    // CrOS-Pi: let the Pi drive the box
+    // cros-plus: greet a host that just connected over WiFi with the
+    // current state (a USB host gets EVT PHASE from the reset instead)
+    if( g_crOSLink.Poll() )
+    {
+        ReportStatus();
+    }
+
+    // cros-plus: let the host drive the box
     ProcessSerialCommands();
 
     // Now we do some time arithmetic to figure out how long this loop took to
@@ -386,7 +401,7 @@ void CCrowboxCore::Loop()
 //----------------------------------------------------------
 // Uptime in seconds since boot, for reporting only.
 //
-// CrOS-Pi: the stock version broke after ~40-50 days, when
+// cros-plus: the stock version broke after ~40-50 days, when
 // millis() wraps around and the float uptimes compared all
 // over the code jumped back to zero. Timing no longer uses
 // this method (see HasElapsed()), and the wrap-arounds are
@@ -398,7 +413,7 @@ cros_time_t CCrowboxCore::GetUptimeSeconds()
 }
 
 //----------------------------------------------------------
-// CrOS-Pi: true once at least 'seconds' have passed since
+// cros-plus: true once at least 'seconds' have passed since
 // the moment 'since'. Unsigned subtraction keeps this right
 // across a millis() wrap-around.
 //----------------------------------------------------------
@@ -460,9 +475,9 @@ cros_time_t CCrowboxCore::HowLongHasBirdBeenGone()
 // too near in time to the prior deposit. See further notes
 // below on contact bounce, and the debouncing strategy.
 //----------------------------------------------------------
-bool CCrowboxCore::EnqueueCoin()              
+bool CROS_ISR_ATTR CCrowboxCore::EnqueueCoin()
 {
-    if( !HasElapsed( m_msLastCoinDetected, 1.0f ) )
+    if( millis() - m_msLastCoinDetected < COIN_DEBOUNCE_MS )
     {
         // We must only accept one coin deposit per second. Because of the
         // type of switch we use to detect coin deposits (a conductive copper
@@ -477,25 +492,31 @@ bool CCrowboxCore::EnqueueCoin()
         return false;
     }
     
-    // CrOS-Pi: only phases 3 and 4 pay for coins. Counting deposits
+    // cros-plus: only phases 3 and 4 pay for coins. Counting deposits
     // in phases 1-2 made the basket open over and over for old coins
     // right after switching to phase 3.
     if( m_currentTrainingPhase >= PHASE_THREE )
     {
-        m_numEnqueuedDeposits++;
+        m_numEnqueuedDeposits = m_numEnqueuedDeposits + 1;
     }
-    m_numUnreportedDeposits++;
+    m_numUnreportedDeposits = m_numUnreportedDeposits + 1;
     m_msLastCoinDetected = millis();
     return true;
 }
 
 //----------------------------------------------------------
-// Called when we pay off a deposit by opening the reward 
-// basket. 
+// Called when we pay off a deposit by opening the reward
+// basket.
+//
+// cros-plus: the coin interrupt changes the same counter, so
+// it must not fire halfway through this (an int is two bytes
+// on the Uno, and read-modify-write is never atomic).
 //----------------------------------------------------------
-void CCrowboxCore::RemoveEnqueuedCoin()      
-{ 
-    m_numEnqueuedDeposits--; 
+void CCrowboxCore::RemoveEnqueuedCoin()
+{
+    noInterrupts();
+    m_numEnqueuedDeposits = m_numEnqueuedDeposits - 1;
+    interrupts();
 }
 
 //----------------------------------------------------------
@@ -582,7 +603,7 @@ void CCrowboxCore::OpenRewardBasket()
         delay( 1000 );
         DetachBasketServo();
 
-        // CrOS-Pi: food is on offer
+        // cros-plus: food is on offer
         ReportEvent( "FEED" );
     }
     
@@ -643,7 +664,7 @@ void CCrowboxCore::CloseRewardBasket()
       m_basketServo.write( servoPosition );
       delay( BASKET_CLOSE_STEP_DELAY_MS );
 
-      // CrOS-Pi: closing takes longer than the watchdog timeout
+      // cros-plus: closing takes longer than the watchdog timeout
       WatchdogFeed();
       DebugPrint("...basket step...");
     }   
@@ -897,7 +918,7 @@ void CCrowboxCore::CheckTrainingPhaseSwitch()
 }
 
 //----------------------------------------------------------
-// CrOS-Pi: everything that has to happen after the training
+// cros-plus: everything that has to happen after the training
 // phase changed, no matter who changed it.
 //
 // Leftover coin deposits are dropped so the new phase starts
@@ -925,7 +946,7 @@ void CCrowboxCore::ApplyTrainingPhaseChange()
 }
 
 //----------------------------------------------------------
-// CrOS-Pi: phases 3 and 4 don't watch the perch at all, so
+// cros-plus: phases 3 and 4 don't watch the perch at all, so
 // arrivals are tracked here for every phase. A press after
 // the perch has been released for EVENT_PERCH_DEPARTURE_DELAY
 // seconds is a new arrival; anything shorter is the same
@@ -950,7 +971,7 @@ void CCrowboxCore::ReportPerchEvents()
 }
 
 //----------------------------------------------------------
-// CrOS-Pi: a sign of life with the uptime, so the Pi can tell
+// cros-plus: a sign of life with the uptime, so the host can tell
 // a quiet box from a dead or unplugged one
 //----------------------------------------------------------
 void CCrowboxCore::ReportHeartbeat()
@@ -965,15 +986,17 @@ void CCrowboxCore::ReportHeartbeat()
 }
 
 //----------------------------------------------------------
-// CrOS-Pi: collect whatever arrived on the serial port and
-// run every complete line as a command. Never blocks.
+// cros-plus: collect whatever arrived from the host (USB serial
+// or WiFi) and run every complete line as a command. Never
+// blocks.
 //----------------------------------------------------------
 void CCrowboxCore::ProcessSerialCommands()
 {
 #if defined( CROS_USE_SERIAL_COMMANDS )
-  while( Serial.available() > 0 )
+  int received;
+  while( ( received = g_crOSLink.Read() ) >= 0 )
   {
-    char c = (char)Serial.read();
+    char c = (char)received;
 
     if( c == '\n' || c == '\r' )
     {
@@ -998,7 +1021,7 @@ void CCrowboxCore::ProcessSerialCommands()
 }
 
 //----------------------------------------------------------
-// CrOS-Pi: one command line from the Pi. The lid keeps all
+// cros-plus: one command line from the host. The lid keeps all
 // of its safety behavior: OPEN still closes by itself and
 // CLOSE still closes in slow steps.
 //----------------------------------------------------------
@@ -1038,29 +1061,29 @@ void CCrowboxCore::ExecuteCommand( const char *pCommand )
     return;
   }
 
-  Serial.print( "EVT ERR " );
-  Serial.println( pCommand );
+  g_crOSLink.print( "EVT ERR " );
+  g_crOSLink.println( pCommand );
 }
 
 //----------------------------------------------------------
-// CrOS-Pi: answer to CMD STATUS
+// cros-plus: answer to CMD STATUS
 //----------------------------------------------------------
 void CCrowboxCore::ReportStatus()
 {
-  Serial.print( "EVT STATUS phase=" );
-  Serial.print( m_currentTrainingPhase );
-  Serial.print( " basket=" );
-  Serial.print( IsRewardBasketOpen() ? "open" : "closed" );
-  Serial.print( " perch=" );
-  Serial.print( Poll_IsPerchPressed() ? 1 : 0 );
-  Serial.print( " queued=" );
-  Serial.print( m_numEnqueuedDeposits );
-  Serial.print( " uptime=" );
-  Serial.println( (unsigned long)GetUptimeSeconds() );
+  g_crOSLink.print( "EVT STATUS phase=" );
+  g_crOSLink.print( m_currentTrainingPhase );
+  g_crOSLink.print( " basket=" );
+  g_crOSLink.print( IsRewardBasketOpen() ? "open" : "closed" );
+  g_crOSLink.print( " perch=" );
+  g_crOSLink.print( Poll_IsPerchPressed() ? 1 : 0 );
+  g_crOSLink.print( " queued=" );
+  g_crOSLink.print( m_numEnqueuedDeposits );
+  g_crOSLink.print( " uptime=" );
+  g_crOSLink.println( (unsigned long)GetUptimeSeconds() );
 }
 
 //----------------------------------------------------------
-// CrOS-Pi: the coin interrupt only counts deposits, the
+// cros-plus: the coin interrupt only counts deposits, the
 // serial port is touched here, outside the interrupt.
 //----------------------------------------------------------
 void CCrowboxCore::ReportCoinEvents()
@@ -1101,7 +1124,7 @@ bool CCrowboxCore::ValidateEEPROMData()
 
   for( int addr = 0 ; addr < 4 ; ++addr )
   {
-    if( *pHeaderCharacter != EEPROM[ addr ] )
+    if( *pHeaderCharacter != (char)EEPROM.read( addr ) )
     {
       // We found a character in the EEPROM data which does
       // not match the CrOS header. 
@@ -1132,16 +1155,21 @@ void CCrowboxCore::CreateEEPROMData()
 
   for( int addr = 0 ; addr < 4 ; ++addr )
   {
-    EEPROM[ addr ] = *pHeaderCharacter;
+    EEPROM.write( addr, *pHeaderCharacter );
 
     // On to the next character
     pHeaderCharacter++;
   }
 
-  // Immediately after the header we write out a byte with a 
+  // Immediately after the header we write out a byte with a
   // value of 1 so that the default for a brand-new Crowbox
   // would be to start in training phase one.
-  EEPROM[ CROS_EEPROM_ADDRESS_TRAINING_PHASE ] = PHASE_ONE;
+  EEPROM.write( CROS_EEPROM_ADDRESS_TRAINING_PHASE, PHASE_ONE );
+
+#if defined( ESP32 )
+  // cros-plus: flash-emulated EEPROM only persists on commit
+  EEPROM.commit();
+#endif
 
   DebugPrint( "...Done!\n" );
 }
@@ -1166,7 +1194,14 @@ void CCrowboxCore::LoadCurrentTrainingPhaseFromEEPROM()
 //----------------------------------------------------------
 void CCrowboxCore::WriteCurrentTrainingPhaseToEEPROM()
 {
+#if defined( ESP32 )
+  // cros-plus: write() only marks the byte dirty when it changed,
+  // so commit() only touches flash on a real phase change
+  EEPROM.write( CROS_EEPROM_ADDRESS_TRAINING_PHASE, m_currentTrainingPhase );
+  EEPROM.commit();
+#else
   EEPROM.update( CROS_EEPROM_ADDRESS_TRAINING_PHASE, m_currentTrainingPhase );
+#endif
   DebugPrint(" EEPROM Updated!\n" );
 }
 

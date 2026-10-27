@@ -1,12 +1,17 @@
-# Serial protocol
+# Box ↔ host protocol
 
-The Arduino Uno running CrOS talks to the Raspberry Pi over its USB cable:
-**57600 baud, 8N1, one line per message**, `\n` terminated (CrOS also accepts `\r\n`).
+Plain text, **one line per message**, `\n` terminated (CrOS also accepts `\r\n`). The same lines
+travel over two links:
 
-Opening the port resets a Uno (DTR). After a reset CrOS spends about 18 seconds parking
-the lid before it sends `EVT PHASE`.
+| Board | Link |
+|-------|------|
+| ESP32 | **TCP port 7777** over WiFi (one host at a time, see [esp32.md](esp32.md)), and USB serial |
+| Arduino Uno | USB serial, **57600 baud, 8N1** |
 
-## Events: Arduino → Pi
+A host that connects over WiFi is greeted with `EVT STATUS ...`. Opening the USB port resets a
+Uno (DTR); after any reset CrOS spends about 18 seconds parking the lid before it sends `EVT PHASE`.
+
+## Events: box → host
 
 Every event line starts with `EVT `. Anything else on the port (for example CrOS debug
 output with `CROS_USE_SERIAL_DEBUG`) should be ignored.
@@ -20,10 +25,10 @@ output with `CROS_USE_SERIAL_DEBUG`) should be ignored.
 | `EVT FEED` | the lid actually opened. Phase 1 keeps the lid open, so this happens once after boot |
 | `EVT CLOSE` | the lid finished closing (also once while parking the lid on boot) |
 | `EVT ALIVE <s>` | every 60 s, uptime in seconds |
-| `EVT STATUS phase=<n> basket=<open\|closed> perch=<0\|1> queued=<n> uptime=<s>` | reply to `CMD STATUS` |
+| `EVT STATUS phase=<n> basket=<open\|closed> perch=<0\|1> queued=<n> uptime=<s>` | reply to `CMD STATUS`, and on every new WiFi connection |
 | `EVT ERR <line>` | a command that was not understood or not allowed |
 
-## Commands: Pi → Arduino
+## Commands: host → box
 
 | Line | Effect |
 |------|--------|
@@ -34,7 +39,7 @@ output with `CROS_USE_SERIAL_DEBUG`) should be ignored.
 
 Lines longer than 23 characters are dropped. Commands are read once per main loop (every 20 ms).
 CrOS is busy and does not read commands while the lid closes (about 13 s) or while the LED
-blinks the phase, so a command sent then waits in the Uno's 64-byte serial buffer.
+blinks the phase, so a command sent then waits in the receive buffer (64 bytes on a Uno).
 
 ## Switches in `cros_constants.h`
 
@@ -43,4 +48,4 @@ blinks the phase, so a command sent then waits in the Uno's 64-byte serial buffe
 | `CROS_USE_SERIAL_EVENTS` | on | `EVT` lines |
 | `CROS_USE_SERIAL_COMMANDS` | on | `CMD` lines |
 | `CROS_USE_WATCHDOG` | on | 8 s hardware watchdog, AVR boards only (Uno R3). Needs the optiboot bootloader, standard on genuine Uno R3; clones with the old bootloader may reboot endlessly after the first watchdog reset — undefine it then |
-| `CROS_USE_SERIAL_DEBUG` | off | stock CrOS debug text (harmless to the Pi, it only reads `EVT` lines) |
+| `CROS_USE_SERIAL_DEBUG` | off | stock CrOS debug text, USB only (harmless, hosts only read `EVT` lines) |

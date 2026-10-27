@@ -15,7 +15,12 @@
 #define CROS_CORE_H
 
 #include <Arduino.h>
+#if defined( ESP32 )
+#include <ESP32Servo.h>
+#else
 #include <Servo.h>
+#endif
+#include "cros_link.h"
 #include "cros_types.h"
 #include "cros_constants.h"
 
@@ -96,14 +101,14 @@ protected:
     void CheckTrainingPhaseSwitch();
 
     //--------------------------------------
-    // CrOS-Pi: serial events for the Pi
+    // cros-plus: events for the host
     //--------------------------------------
     void ReportPerchEvents();
     void ReportCoinEvents();
     void ReportHeartbeat();
 
     //--------------------------------------
-    // CrOS-Pi: serial commands from the Pi
+    // cros-plus: commands from the host
     //--------------------------------------
     void ProcessSerialCommands();
     void ExecuteCommand( const char *pCommand );
@@ -125,7 +130,7 @@ protected:
 
 private:
     //--------------------------------------
-    // CrOS-Pi: all moments are millis() values
+    // cros-plus: all moments are millis() values
     // paired with a flag, instead of float
     // uptimes compared against each other,
     // which broke after ~49.7 days of running
@@ -180,7 +185,7 @@ private:
     volatile int m_numEnqueuedDeposits;
 
     //--------------------------------------
-    // CrOS-Pi: coin deposits counted by the
+    // cros-plus: coin deposits counted by the
     // interrupt but not yet reported over
     // serial (the interrupt can't touch the
     // serial port), and the perch state used
@@ -192,7 +197,7 @@ private:
     cros_ms_t    m_msLastHeartbeat;
 
     //--------------------------------------
-    // CrOS-Pi: the command line being received.
+    // cros-plus: the command line being received.
     // A line longer than the buffer is dropped
     // as a whole.
     //--------------------------------------

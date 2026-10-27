@@ -48,8 +48,8 @@
 //#define CROS_USE_SERIAL_DEBUG
 
 //======================================
-// CrOS-Pi: one-line machine-readable events
-// for the Raspberry Pi on the USB serial port:
+// cros-plus: one-line machine-readable events
+// for the host (USB serial, or WiFi on ESP32):
 //   EVT LAND        a bird landed on the perch
 //   EVT LEAVE       the perch has been empty for a moment
 //   EVT COIN        a coin deposit was detected
@@ -57,14 +57,14 @@
 //   EVT CLOSE       the reward basket finished closing
 //   EVT PHASE <n>   current training phase (on boot and on change)
 //   EVT ALIVE <s>   heartbeat with uptime in seconds
-// The Pi ignores every line that does not
+// Hosts ignore every line that does not
 // start with "EVT ", so debug output may
 // be enabled at the same time.
 //======================================
 #define CROS_USE_SERIAL_EVENTS
 
 //======================================
-// CrOS-Pi: the perch must stay released this
+// cros-plus: the perch must stay released this
 // long before the next press counts as a new
 // arrival, so a bird hopping around on the
 // perch is reported only once.
@@ -72,7 +72,7 @@
 #define EVENT_PERCH_DEPARTURE_DELAY  2.0f
 
 //======================================
-// CrOS-Pi: commands from the Raspberry Pi, one
+// cros-plus: commands from the host, one
 // per line on the same serial port:
 //   CMD STATUS       reply: EVT STATUS phase=<n> basket=<open|closed> perch=<0|1> queued=<n> uptime=<s>
 //   CMD PHASE <n>    switch to training phase 1-4 (same as the button)
@@ -85,13 +85,13 @@
 #define CROS_COMMAND_MAX_LENGTH  24
 
 //======================================
-// CrOS-Pi: how often EVT ALIVE is sent, so
-// the Pi notices a dead or unplugged box
+// cros-plus: how often EVT ALIVE is sent, so
+// the host notices a dead or unplugged box
 //======================================
 #define EVENT_HEARTBEAT_INTERVAL  60.0f
 
 //======================================
-// CrOS-Pi: hardware watchdog. If Loop()
+// cros-plus: hardware watchdog. If Loop()
 // stops running for 8 seconds (a hang,
 // a glitch from a noisy servo supply),
 // the Arduino reboots on its own and
@@ -152,13 +152,44 @@
 // will have to be changed if porting this 
 // code to run on another Arduino board, 
 // or on one of the Particle boards. 
-// NOTE: The input pins assigned to COIN 
-// must support interrupts!  
+// NOTE: The input pins assigned to COIN
+// must support interrupts!
+#if defined( ESP32 )
+// cros-plus: ESP32 DevKit (ESP32-WROOM-32). Every GPIO
+// below has an internal pull-up and interrupts, and none
+// of them is a boot strapping pin except the LED on GPIO2,
+// which is the on-board LED of most DevKit clones.
+#define OUTPUT_PIN_LED          2
+#define OUTPUT_PIN_SERVO        18
+#define INPUT_PIN_PERCH         25
+#define INPUT_PIN_COIN          26
+#define INPUT_PIN_PHASE_SELECT  27
+#else
 #define OUTPUT_PIN_LED          13
-#define OUTPUT_PIN_SERVO        9      
+#define OUTPUT_PIN_SERVO        9
 #define INPUT_PIN_PERCH         2
 #define INPUT_PIN_COIN          3
 #define INPUT_PIN_PHASE_SELECT  4
+#endif
+
+//======================================
+// cros-plus: one coin deposit per this many
+// milliseconds at most (contact bounce on
+// the copper coin rail). Integer, because
+// the ESP32 must not touch floats inside
+// an interrupt.
+//======================================
+#define COIN_DEBOUNCE_MS  1000UL
+
+//======================================
+// cros-plus: interrupt code has to live in
+// IRAM on an ESP32
+//======================================
+#if defined( ESP32 )
+#define CROS_ISR_ATTR  IRAM_ATTR
+#else
+#define CROS_ISR_ATTR
+#endif
 
 //======================================
 // Constants for servo behavior
